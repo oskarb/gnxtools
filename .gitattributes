@@ -1,0 +1,4 @@
+# Trust git to do binary detection, and convert text to native line endings
+* text=auto
+
+
