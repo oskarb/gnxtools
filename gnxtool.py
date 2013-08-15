@@ -1,5 +1,22 @@
 #!/usr/bin/python
 
+
+## This code is licensed under GPL v2 or later.
+## Copyright 2013 Amido AB
+##
+## Authors:
+##     Andreas Pegelow
+##     Oskar Berggren <oskar.berggren@gmail.com>
+
+
+## Source code repository is at https://github.com/oskarb/gnxtools
+
+
+## This tool can communicate with Genexis Fiberxport over UDP commands.
+
+GNXTOOL_VERSION = 0.3
+
+
 import socket
 import sys
 import struct
