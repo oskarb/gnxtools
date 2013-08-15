@@ -9,13 +9,17 @@ gnxMagicCookie = 0x0df0c660
 port = 9115
 Help ='Usage: gnxtool [options] IP command \n \n \
 Gnxtool is a simple command line interface for \n comunicating with a FiberXport unit. If no \n \
-command is specified get-values is default. \n \n \
-Commands: \n    get-values - Retrieve general information and port status \n \
+command is specified status is default. \n \n \
+Commands: \n    status - Retrieve general information and port status \n \
    reload-config - Tells the unit to perform an APS request immediately \n \
    reset - Reset the CPU  \n \
    reset-hard - Reset the CPU and the Switch Chip \n \
    read-counters - Read all port counters \n \
-   clear-counters - Clears all port counters' # FINISH ME
+   clear-counters - Clears all port counters\n \
+   aps-status - Retrieve the latest APS status\n \
+   clear-aps - Clear any stored APS configuration settings\n \
+   \n Options:  \n \
+    -h  Display this help text' # FINISH ME
 
 
 try:
@@ -101,7 +105,7 @@ def getValue(gnxunithost):
 	elif valueId == 2:
 		print 'CPE uptime:', secondsTodhms(value)  
 	elif valueId == 3:
-		print 'Time since switch-counter reset:', secondsTodhms(value) 
+		print 'Time since counter reset:', secondsTodhms(value) 
 	elif valueId == 4:
 		availableTypes = ['OCG-16', 'OCG-17/18/20/1xx', 'OCG-10xx']
                 if value < len(availableTypes):
@@ -143,28 +147,29 @@ def getValue(gnxunithost):
                 if value == -1:
                         print'No valid APS response received'
                 else:
-                        print 'Time since APS response:', secondsTodhms(value)
+                        print '\nTime since APS response:', secondsTodhms(value)
+                        getApsStatus(gnxunithost);
                 
 	elif valueId == 10:
                 value, = struct.unpack_from('<I', retValues)
 		## value is the ip address as an int in host byte order.
 		## inet_ntoa takes a string with the ip in network byte order.
 		print 'Router IPv4 address: ', socket.inet_ntoa(struct.pack('!I', value))
-		print'\n'
+		print '\n'
                
 	## Skip handled data, and increase the value id for next iteration.
         retValues = retValues[4:]
         valueId = valueId + 1
     getPortStatusExt(gnxunithost)
-def bitExtractor(data, start, mask): # mask is how many bits to select (max 2).
+def bitExtractor(data, start, mask): # mask is how many bits to select.
                                      # Returns the selected bits
-        if mask == 1:
-            mask= 0b1
-        elif mask == 2:
-            mask= 0b11
-        else:
-                raise Exeption('Max two bits can be selected')      
-        result = (data >> start) & mask
+        i= 0
+        maskBin = 0
+        while i < mask:
+                maskBin += 2**i
+                i +=1
+                
+        result = (data >> start) & maskBin
         return result
 
 def getPortStatusExt(gnxunithost):
@@ -175,9 +180,17 @@ def getPortStatusExt(gnxunithost):
         retValues = response[1:]  # skip the first byte, skips cmdcode
         respCode, = struct.unpack_from('<B', retValues)
         portLogicVal = [[0 for x in xrange(7)] for x in xrange(9)]
-        portStatusTitle=['','Logicalstate','Link', 'Duplex','Speed (Mb/s)','Lflowen','Lflowasym','Rflowen','Rflowasym',]
+        portStatusTitle=['','State','Link', 'Duplex','Speed (Mb/s)','Lflowen','Lflowasym','Rflowen','Rflowasym',]
         portTitle = ['','WAN', 'Data Port 1', 'Data Port 2', 'Data Port 3', 'Data Port 4', 'CPU',]
         if responseCode(respCode) :
+                PORTVAL_LOGICALSTATE = 1
+                PORTVAL_LINK= 2
+                PORTVAL_DUPLEX=3
+                PORTVAL_SPEED=4
+                PORTVAL_LFLOWEN=5
+                PORTVAL_LFLOWASYM=6
+                PORTVAL_RFLOWEN=7
+                PORTVAL_RFLOWASYM=8
                 retValues =  retValues[3:]
                 flowUp = 'Yes'  ##FIX ME: Decide what to call me.
                 flowDown = 'No' ##FIX ME: Decide what to call me.
@@ -189,74 +202,81 @@ def getPortStatusExt(gnxunithost):
                         portLogicVal[0][x] = portTitle[x]
                 
                 i = 1
-                j = 1
+                enabled = True
                 while i < 7:
                         portValue, = struct.unpack_from('<H', retValues)
-                        j = 0
-                        while j <= 8:
-                                if j== 1: #Logicalstate
-                                        if bitExtractor(portValue,0,2) == 0:
-                                                result = 'Disabled'
-                                        elif bitExtractor(portValue,0,2) == 1:
-                                                result = 'Blocked (layer-2 loop detected)'
-                                        elif bitExtractor(portValue,0,2) == 2:
-                                                result = '0x02 (Unknown)'
-                                        elif bitExtractor(portValue,0,2) == 3:
-                                                 result = 'Enabled'
-                                        portLogicVal[j][i]= result
-                                
-                                elif j== 2: #Link
-                                        if bitExtractor(portValue,3,1) == 1:
-                                                 result = 'Up'
-                                        else:
-                                                result = 'Down'
-                                        portLogicVal[j][i]= result
-                                elif j== 3: #Duplex
-                                        if bitExtractor(portValue,4,1) == 1:
-                                                 result = 'Full'
-                                        else:
-                                                result = 'Half'
-                                        portLogicVal[j][i]= result
-                                elif j== 4: #Speed
-                                        if bitExtractor(portValue,5,2) == 0 and bitExtractor(portValue,0,2) == 3:
-                                                result = '10'
-                                        elif bitExtractor(portValue,5,2) == 1 and bitExtractor(portValue,0,2) == 3:
-                                                result = '100'
-                                        elif bitExtractor(portValue,5,2) == 2 and bitExtractor(portValue,0,2) == 3:
-                                                result = '1000'
-                                        else:
-                                                result =0
-                                        portLogicVal[j][i]= result
                         
-                                elif j== 5: #Lflowen
-                                        if bitExtractor(portValue,7,1) == 1:
-                                                 result = flowUp
-                                        else:
-                                                result = flowDown
-                                        portLogicVal[j][i]= result
+                        #Logicalstate
+                        if bitExtractor(portValue,0,2) == 0:
+                                result = 'Disabled'
+                                enabled = False
+                        elif bitExtractor(portValue,0,2) == 1:
+                                result = 'Blocked'
+                        elif bitExtractor(portValue,0,2) == 2:
+                                result = '0x02(Unknown)'
+                        elif bitExtractor(portValue,0,2) == 3:
+                                result = 'Enabled'
+                        portLogicVal[PORTVAL_LOGICALSTATE][i]= result
+                        if enabled:
+                                #Link
+                                if bitExtractor(portValue,3,1) == 1:
+                                        result = 'Up'
+                                else:
+                                        result = 'Down'
+                                portLogicVal[PORTVAL_LINK][i]= result
+                                
+                                #Duplex
+                                if bitExtractor(portValue,4,1) == 1:
+                                        result = 'Full'
+                                else:
+                                        result = 'Half'
+                                portLogicVal[PORTVAL_DUPLEX][i]= result
+                                
+                                #Speed        
+                                if bitExtractor(portValue,5,2) == 0 and bitExtractor(portValue,0,2) == 3:
+                                         result = '10'
+                                elif bitExtractor(portValue,5,2) == 1 and bitExtractor(portValue,0,2) == 3:
+                                        result = '100'
+                                elif bitExtractor(portValue,5,2) == 2 and bitExtractor(portValue,0,2) == 3:
+                                        result = '1000'
+                             
+                                portLogicVal[PORTVAL_SPEED][i]= result
+                                
+                                #Lflowen
+                                if bitExtractor(portValue,7,1) == 1:
+                                        result = flowUp
+                                else:
+                                        result = flowDown
+                                portLogicVal[PORTVAL_LFLOWEN][i]= result
                                         
-                                elif j== 6: #Lflowasym
-                                        if bitExtractor(portValue,8,1) == 1:
-                                                 result = flowUp
-                                        else:
-                                                result = flowDown
-                                        portLogicVal[j][i]= result
-                              
-                                elif j== 7: #Rflowen
-                                        if bitExtractor(portValue,10,1) == 1:
-                                                 result = flowUp
-                                        else:
-                                                result = flowDown
-                                        portLogicVal[j][i]= result
-                                elif j== 8: #Rflowasym
-                                        if bitExtractor(portValue,11,1) == 1:
-                                                 result = flowUp
-                                        else:
-                                                result = flowDown
-                                        portLogicVal[j][i]= result
-                                j += 1
-                        j=1 
-                        retValues = retValues[2:] 
+                                #Lflowasym
+                                if bitExtractor(portValue,8,1) == 1:
+                                        result = flowUp
+                                else:
+                                        result = flowDown
+                                portLogicVal[PORTVAL_LFLOWASYM][i]= result
+                                      
+                                #Rflowen
+                                if bitExtractor(portValue,10,1) == 1:
+                                        result = flowUp
+                                else:
+                                        result = flowDown
+                                portLogicVal[PORTVAL_RFLOWEN][i]= result
+                                
+                                #Rflowasym
+                                if bitExtractor(portValue,11,1) == 1:
+                                        result = flowUp
+                                else:
+                                        result = flowDown
+                                portLogicVal[PORTVAL_RFLOWASYM][i]= result
+                        else: #If the port is disabled the values is "-"
+                                j = 2
+                                while j < 9:
+                                        portLogicVal[j][i]= '-'
+                                        j += 1
+                        
+                        retValues = retValues[2:]
+                        enabled = True
                         i += 1
                 
           
@@ -270,8 +290,6 @@ def getPortStatusExt(gnxunithost):
              
             
 def getPortCounters(gnxunithost, getPortArg):
-
-        
 
         if getPortArg == 0:
                 gnxCmdGetPortCounters = 0x4B
@@ -361,6 +379,75 @@ def reloadConfig(gnxunithost):
     s.sendto(udpRequest, (gnxunithost, port))
     print'Expected, no response'
 
+def getApsStatus(gnxunithost):
+    gnxCmdGetApsStatus = 0x54
+
+    udpRequest = struct.pack('<IB', gnxMagicCookie, gnxCmdGetApsStatus)
+    response = sendData(gnxunithost, udpRequest, gnxCmdGetApsStatus)
+    retValues = response[1:]  # skip the first byte
+    value, = struct.unpack_from('<i', retValues)
+    if value == -1:
+            print'No valid APS response received'
+    else:
+            print '\nTime since APS response:', secondsTodhms(value)
+    retValues = response[5:]  # skip the first five byte
+    value, = struct.unpack_from('<B', retValues)
+    bitfieldIndx = 0
+    bitState = False
+    prevBitState = False
+        
+    bitState = bitExtractor(value, bitfieldIndx, 1);
+    if bitState:
+            print 'Changes detected in the last APS refresh'
+    else:
+            print 'No changes detected in the last APS refresh'
+    bitfieldIndx += 1
+    
+    bitState = bitExtractor(value, bitfieldIndx, 1);
+    if bitState:
+            print 'Some changes are still pending.'
+    else:
+            print 'No changes pending'
+    bitfieldIndx += 1
+    
+    bitState = bitExtractor(value, bitfieldIndx, 1);
+    if bitState:
+            prevBitState = True
+    else:
+            print 'No scheduled reset'
+    bitfieldIndx += 1
+    
+    bitState = bitExtractor(value, bitfieldIndx, 1);
+    if bitState and prevBitState:
+            print 'A hard reset is scheduled because of the APS process'
+    else:
+            print 'A reset is scheduled because of the APS process'
+    bitfieldIndx += 1
+    
+    bitState = bitExtractor(value, bitfieldIndx, 1);
+    if bitState:
+            print 'The CPE is using locally stored settings'
+    else:
+            print 'The CPE is not using locally stored settings'
+    
+def clearAPS(gnxunithost):
+        gnxCmdClearAPS = 0x52
+
+        udpRequest = struct.pack('<IB', gnxMagicCookie, gnxCmdClearAPS)
+        response = sendData(gnxunithost, udpRequest, gnxCmdClearAPS)
+        retValues = response[1:]  # skip the first byte
+        value, = struct.unpack_from('<B', retValues)
+
+        if value == 0:
+                print'No stored settings were present to be cleared'
+        elif value == 1:
+                print 'No stored settings were present to be cleared'
+        elif value == 2:
+                print 'Error occurred during clear operation'
+        else:
+                print 'Unknown response: ', value
+                
+        
     
 def reset(gnxunithost):
      gnxCmdSoftReset = 0x49
@@ -412,7 +499,7 @@ def ipFormatValidation(inIp):     #checks for valid IP format
 
 indexArg = 1
 argHost= 0
-command ='getvalue'
+command ='status'
 
 if len(sys.argv) == 1:
         print'Type -h for Help'
@@ -448,7 +535,7 @@ while len(sys.argv)> indexArg:
 
 if argHost != 0:
         
-        if command.lower() == 'getvalue':
+        if command.lower() == 'status':
                        print 'Sending request to {0} port {1}\n'.format(argHost, port)
                        getValue(argHost);
                        
@@ -468,8 +555,14 @@ if argHost != 0:
         elif command.lower() == 'reset-hard':
                 print 'Sending reset-hard request to {0} port {1}\n'.format(argHost, port)
                 resetHard(argHost);
+        elif command.lower() == 'aps-status':
+                print 'Sending aps-status request to {0} port {1}\n'.format(argHost, port)
+                getApsStatus(argHost);
+        elif command.lower() == 'clear-aps':
+                print 'Sending clear-aps request to {0} port {1}\n'.format(argHost, port)
+                clearAPS(argHost);
         else:
-                print 'Not a valid Command, typ -h for Help'
+                print 'Not a valid command, type -h for Help'
         
 
             
